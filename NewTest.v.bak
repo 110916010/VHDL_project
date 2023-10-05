@@ -1,0 +1,230 @@
+module NewTest (clk,reset,left,right,up,down,segout,scanout);
+
+input clk,reset,left,right,up,down;
+output reg[7:0] segout;
+output reg[7:0] scanout;
+
+reg[25:0] cnt_scan;
+reg[30:0] rnd1;
+reg[16:0] rnd2;
+
+reg[2:0] x=7, y=7; //用直觀的方式記錄初始玩家的位置，x=y=7->最右下角(q[63])
+reg[2:0] ufoX[4], ufoY[4];
+reg [2:0] ux[4];
+reg [1:0] uy[4];
+reg [1:0] ufoWall[4]; //決定是哪一面牆(0、1、2、3)發出[ufo1]、[ufo2]、[ufo3]
+reg [2:0] ufoStart[4]; //決定是哪一面牆的哪個位置(0-7)發出[ufo1]、[ufo2]、[ufo3]
+reg [3:0] ufoRecord[4]; //用來記錄走了幾格
+reg [1:0] ufoWallFirst[4];
+
+reg clk1;
+reg [63:0] q ;
+reg [2:0] i,j,r;
+reg [1:0] level;
+reg [63:0] q1 = 64'b01000001_00101011_00010100_11111000_00100000_11111101_00000101_00000101;
+
+//------------------ clock running -----------------------
+always@(posedge clk )
+begin
+	cnt_scan<=cnt_scan+1;
+	if (cnt_scan == 01250000) begin
+	cnt_scan <=0;
+	clk1 = ~clk1;
+	end
+end
+
+always@(posedge clk)
+begin
+	rnd1 <= rnd1 + 1;
+	rnd2 <= rnd2 + 1;
+
+	ux[0] = rnd1[25:23] ^ rnd2[10:8];
+	uy[0] = rnd1[21:20] ^ rnd2[15:14];
+	ufoWallFirst[0] = rnd1[20:19] ^ rnd2[8:7]; //第一個ufo隨機選取一面牆出發
+
+	ux[1] = rnd1[20:18] ^ rnd2[9:7];
+	uy[1] = rnd1[24:23] ^ rnd2[12:11];
+	ufoWallFirst[1] = rnd1[16:15] ^ rnd2[9:8]; //第二個ufo隨機選取一面牆出發
+
+	ux[2] = rnd1[15:13] ^ rnd2[13:12];
+	uy[2] = rnd1[11:10] ^ rnd2[7:6];
+	ufoWallFirst[2] = rnd1[12:11] ^ rnd2[3:2]; //第三個ufo隨機選取一面牆出發
+end
+
+//---------modify display digit ----------
+always @(posedge clk1 , posedge reset)
+begin
+
+	if (reset == 1)
+	begin
+		for(i=0;i<4;i=i+1) 
+		begin
+			ufoX[i] = 0;
+			ufoY[i] = 0;
+		end
+		i = 0;
+		level = 1;
+		x = 7;
+		y = 7;
+		q = 64'b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000;
+		q[x+8*y] = 1'b1;
+	end
+	
+	else 
+	begin
+	if(i <= level)  //創造幾個ufo，未滿兩個(level)時就一直進入這個迴圈，只有遊戲一開始會有這道程序
+	begin
+		if (ufoX[i] == 0 && ufoY[i] == 0) //如果ufo(ufo[0])的座標皆==0->尚未存在
+		begin
+			ufoX[i] = ux[i]; //把隨意產生的0-7(從哪一面牆出發)的值給X
+			ufoY[i] = uy[i] ; //把隨意產生的0-7(從ufo[i]面牆的哪一個位置)的值給Y
+			ufoWall[i] = ufoWallFirst[i] ;
+			ufoRecord[0] = 0;
+		end
+		i = i + 1;
+	end
+	else //已經創造好兩個ufo了，此時i等於2
+		for (j = 0 ; j<= level; j = j+1)
+			if (ufoRecord[j]==8) //生命結束或者是走完八格
+			begin
+				ufoX[j] = ux[j]; //指定一個出現的x座標給他
+				ufoY[j] = uy[j]; //指定一個出現的y座標給他
+				ufoWall[j] = ufoWallFirst[j];
+				ufoRecord[j] = 0;
+			end
+	q = q & 64'h0000_0000_0000_0000;
+	for(j=0;j<=level;j=j+1) //做兩次，每個ufo做一次
+		q[ufoX[j]+8*ufoY[j]] = 1'b1; //ufo亮起來
+
+	for(r=0;r<=level;r=r+1) //每一個ufo都需要做同樣的動作
+	begin
+		if(ufoRecord[r]<8) //ufoRecord[r]尚未走完所有格數
+		begin
+			if(ufoWall[r]==0) //如果初發射的牆是0牆的話
+			begin
+				if(ufoRecord[r] == 0)
+				begin
+					ufoY[r] = 0; //ufoY[r]若出現在0牆，y值會必須需得是0
+				end
+				q[ufoX[r]+8*ufoY[r]] = 1'b1; //ufo原地亮
+				ufoRecord[r] = ufoRecord[r] + 1; //紀錄ufo走了一格囉
+				q[x+8*y] = 1'b1; //角色亮
+				ufoY[r] = ufoY[r] + 1; //紀錄ufo走了一格囉，要往下移一個了
+			end
+	
+	if(ufoWall[r]==1) //如果發射的牆是1牆的話，需要往左走
+	begin
+		if(ufoRecord[r] == 0) //是初發射
+		begin
+			ufoX[r] = 7; //初發射在1牆的時候，ufoX[r]一定會是7
+		end
+		q[ufoX[r] + 8*ufoY[r]] = 1'b1; //ufo原地亮
+		ufoRecord[r] = ufoRecord[r]+1; //紀錄ufo走了一格囉
+		q[x+8*y] = 1'b1; //角色亮
+		ufoX[r] = ufoX[r] - 1; //紀錄ufo往左走一格
+	end
+
+	if(ufoWall[r]==2) //如果發射的牆是2牆的話，需要往上走
+	begin
+		if(ufoRecord[r] == 0) //是初發射
+		begin
+			ufoY[r] = 7; //初發射在2牆的時候，ufoY[r]一定會是7
+		end
+		q[ufoX[r] + 8*ufoY[r]] = 1'b1; //ufo原地亮
+		ufoRecord[r] = ufoRecord[r]+1; //紀錄ufo走了一格囉
+		q[x+8*y] = 1'b1; //角色亮
+		ufoY[r] = ufoY[r] - 1; //紀錄ufo往上走一格
+	end
+
+	if(ufoWall[r]==3) //如果發射的牆是3牆的話，需要往左走
+	begin
+		if(ufoRecord[r] == 0) //是初發射
+		begin
+			ufoX[r] = 0; //初發射在3牆的時候，ufoX[r]一定會是0
+		end
+		q[ufoX[r] + 8*ufoY[r]] = 1'b1; //ufo原地亮
+		ufoRecord[r] = ufoRecord[r]+1; //紀錄ufo走了一格囉
+		q[x+8*y] = 1'b1; //角色亮
+		ufoX[r] = ufoX[r] + 1; //紀錄ufo往右走一格
+	end
+	end
+end
+
+	if (left == 0)  //左移
+	begin
+		x = x - 1;
+		q[x+8*y] = 1'b1;
+	end
+	
+	else if (right == 0)  //右移
+	begin
+		x = x + 1;
+		q[x+8*y] = 1'b1;
+	end
+
+	else if (up == 0 ) //上移
+	begin
+		y = y - 1;
+		q[x+8*y] = 1'b1;
+	end
+	
+	if(x == 0)
+		q = q1;
+	for(r=0;r<=level;r=r+1)
+	begin
+		if(x==ufoX[r] && y==ufoY[r])
+			q = 64'b10000110_10001001_11100110_11101111_10001000_11101111_00101000_11101111;
+	end
+end
+end
+ //-----------scan and display 7-SEG-------------掃描整個矩陣----------
+
+always@(cnt_scan[15:13])
+begin
+case(cnt_scan[15:13])
+3'b000 :
+scanout = 8'b0000_0001;
+3'b001 :
+scanout = 8'b0000_0010;
+3'b010 :
+scanout = 8'b0000_0100;
+3'b011 :
+scanout = 8'b0000_1000;
+3'b100 :
+scanout = 8'b0001_0000;
+3'b101 :
+scanout = 8'b0010_0000;
+3'b110 :
+scanout = 8'b0100_0000;
+3'b111 :
+scanout = 8'b1000_0000;
+default :
+scanout = 8'b0000_0001;
+endcase
+end
+
+always@(scanout) 
+begin
+case(scanout)
+8'b0000_0001:
+segout=q[63:56];
+8'b0000_0010:
+segout=q[55:48];
+8'b0000_0100:
+segout=q[47:40];
+8'b0000_1000:
+segout=q[39:32];
+8'b0001_0000:
+segout=q[31:24];
+8'b0010_0000:
+segout=q[23:16];
+8'b0100_0000:
+segout=q[15:8];
+8'b1000_0000:
+segout=q[7:0];
+default:
+segout=8'b11111111;
+endcase
+end
+
+endmodule 

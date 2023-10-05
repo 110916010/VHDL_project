@@ -1,0 +1,5 @@
+
+State Machine - |NewTest|record
+Name record.00 
+record.01 0 
+record.00 1 
